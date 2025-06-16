@@ -17,7 +17,7 @@ fn main() {
     let mut stderr_lock = stderr.lock();
 
     // Apply the patch and print outputs
-    if let Err(_) = apply_patch(&patch, &mut stdout_lock, &mut stderr_lock) {
+    if apply_patch(&patch, &mut stdout_lock, &mut stderr_lock).is_err() {
         // apply_patch already wrote error messages to stderr
         process::exit(2);
     }
