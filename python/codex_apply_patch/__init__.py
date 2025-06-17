@@ -21,7 +21,7 @@ generate_patch_from_files = _rust_module.py_generate_patch_from_files
 ApplyPatchError = _rust_module.PyApplyPatchError
 InMemoryPatchResult = _rust_module.PyInMemoryPatchResult
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 __all__ = [
     "apply_patch",
     "apply_patch_in_memory", 
