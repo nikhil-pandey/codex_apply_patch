@@ -779,6 +779,127 @@ fn derive_new_contents_from_content(
     })
 }
 
+/// Generate a patch in the custom format from original and new file contents
+/// 
+/// # Arguments
+/// * `path` - The file path (used in the patch output)
+/// * `original_content` - The original file content (None if file is being added)
+/// * `new_content` - The new file content (None if file is being deleted)
+/// 
+/// # Returns
+/// A string containing the patch in the custom format
+pub fn generate_patch_from_files(
+    path: &Path,
+    original_content: Option<&str>,
+    new_content: Option<&str>,
+) -> Result<String, ApplyPatchError> {
+    let mut patch = String::from("*** Begin Patch\n");
+    
+    match (original_content, new_content) {
+        (None, Some(new)) => {
+            // Add File case
+            patch.push_str(&format!("*** Add File: {}\n", path.display()));
+            for line in new.lines() {
+                patch.push_str(&format!("+{}\n", line));
+            }
+        }
+        (Some(_), None) => {
+            // Delete File case
+            patch.push_str(&format!("*** Delete File: {}\n", path.display()));
+        }
+        (Some(original), Some(new)) => {
+            // Update File case
+            patch.push_str(&format!("*** Update File: {}\n", path.display()));
+            
+            if original == new {
+                // No changes, but we need at least one chunk to be valid
+                patch.push_str("@@\n");
+                if let Some(first_line) = original.lines().next() {
+                    patch.push_str(&format!(" {}\n", first_line));
+                }
+            } else {
+                let text_diff = TextDiff::from_lines(original, new);
+                let mut current_chunk_lines = Vec::new();
+                let mut has_changes = false;
+                
+                for change in text_diff.iter_all_changes() {
+                    let line = change.value();
+                    // Remove the trailing newline that similar adds
+                    let line = line.strip_suffix('\n').unwrap_or(line);
+                    
+                    match change.tag() {
+                        similar::ChangeTag::Equal => {
+                            current_chunk_lines.push(format!(" {}", line));
+                        }
+                        similar::ChangeTag::Delete => {
+                            current_chunk_lines.push(format!("-{}", line));
+                            has_changes = true;
+                        }
+                        similar::ChangeTag::Insert => {
+                            current_chunk_lines.push(format!("+{}", line));
+                            has_changes = true;
+                        }
+                    }
+                }
+                
+                if has_changes {
+                    patch.push_str("@@\n");
+                    for line in current_chunk_lines {
+                        patch.push_str(&format!("{}\n", line));
+                    }
+                } else {
+                    // Fallback for edge case
+                    patch.push_str("@@\n");
+                    if let Some(first_line) = original.lines().next() {
+                        patch.push_str(&format!(" {}\n", first_line));
+                    }
+                }
+            }
+        }
+        (None, None) => {
+            return Err(ApplyPatchError::ComputeReplacements(
+                "Both original and new content cannot be None".to_string()
+            ));
+        }
+    }
+    
+    patch.push_str("*** End Patch");
+    Ok(patch)
+}
+
+/// Generate a patch for multiple files
+/// 
+/// # Arguments  
+/// * `file_changes` - A map of file paths to (original_content, new_content) tuples
+/// 
+/// # Returns
+/// A string containing the patch in the custom format for all files
+pub fn generate_patch_from_multiple_files(
+    file_changes: &HashMap<PathBuf, (Option<String>, Option<String>)>,
+) -> Result<String, ApplyPatchError> {
+    let mut patch = String::from("*** Begin Patch\n");
+    
+    for (path, (original, new)) in file_changes {
+        let file_patch = generate_patch_from_files(
+            path,
+            original.as_deref(), 
+            new.as_deref()
+        )?;
+        
+        // Extract just the file operations part (skip the Begin/End markers)
+        let lines: Vec<&str> = file_patch.lines().collect();
+        if lines.len() > 2 {
+            // Skip "*** Begin Patch" and "*** End Patch"
+            for line in &lines[1..lines.len()-1] {
+                patch.push_str(&format!("{}\n", line));
+            }
+        }
+    }
+    
+    patch.push_str("*** End Patch");
+    Ok(patch)
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -1486,6 +1607,84 @@ g
             _ => panic!("Expected ComputeReplacements error"),
         }
     }
+
+    #[test]
+    fn test_generate_patch_from_files_add() {
+        let path = PathBuf::from("new.txt");
+        let patch = generate_patch_from_files(&path, None, Some("hello\nworld")).unwrap();
+        
+        let expected = "*** Begin Patch\n*** Add File: new.txt\n+hello\n+world\n*** End Patch";
+        assert_eq!(patch, expected);
+    }
+
+    #[test]
+    fn test_generate_patch_from_files_delete() {
+        let path = PathBuf::from("old.txt");
+        let patch = generate_patch_from_files(&path, Some("content"), None).unwrap();
+        
+        let expected = "*** Begin Patch\n*** Delete File: old.txt\n*** End Patch";
+        assert_eq!(patch, expected);
+    }
+
+    #[test]
+    fn test_generate_patch_from_files_update() {
+        let path = PathBuf::from("test.txt");
+        let original = "line1\nline2\nline3";
+        let new = "line1\nmodified line2\nline3";
+        let patch = generate_patch_from_files(&path, Some(original), Some(new)).unwrap();
+        
+        let expected = "*** Begin Patch\n*** Update File: test.txt\n@@\n line1\n-line2\n+modified line2\n line3\n*** End Patch";
+        assert_eq!(patch, expected);
+    }
+
+    #[test]
+    fn test_generate_patch_from_files_no_changes() {
+        let path = PathBuf::from("same.txt");
+        let content = "unchanged\nlines";
+        let patch = generate_patch_from_files(&path, Some(content), Some(content)).unwrap();
+        
+        // Should still generate a valid patch with context
+        let expected = "*** Begin Patch\n*** Update File: same.txt\n@@\n unchanged\n*** End Patch";
+        assert_eq!(patch, expected);
+    }
+
+    #[test]
+    fn test_generate_patch_from_multiple_files() {
+        let mut file_changes = HashMap::new();
+        file_changes.insert(
+            PathBuf::from("new.txt"),
+            (None, Some("new content".to_string()))
+        );
+        file_changes.insert(
+            PathBuf::from("old.txt"),
+            (Some("old content".to_string()), None)
+        );
+        file_changes.insert(
+            PathBuf::from("modified.txt"),
+            (Some("old line".to_string()), Some("new line".to_string()))
+        );
+        
+        let patch = generate_patch_from_multiple_files(&file_changes).unwrap();
+        
+        // Should contain all three operations
+        assert!(patch.contains("*** Begin Patch"));
+        assert!(patch.contains("*** End Patch"));
+        assert!(patch.contains("*** Add File: new.txt") || patch.contains("*** Delete File: old.txt") || patch.contains("*** Update File: modified.txt"));
+    }
+
+    #[test]
+    fn test_generate_patch_from_files_error() {
+        let path = PathBuf::from("error.txt");
+        let result = generate_patch_from_files(&path, None, None);
+        
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ApplyPatchError::ComputeReplacements(msg) => {
+                assert!(msg.contains("Both original and new content cannot be None"));
+            }
+            _ => panic!("Expected ComputeReplacements error"),
+        }
+    }
 }
 
 // Python bindings using PyO3
@@ -1688,6 +1887,47 @@ fn py_get_api_instructions() -> &'static str {
     APPLY_PATCH_API_INSTRUCTIONS
 }
 
+/// Generate a patch from original and new file contents
+#[cfg(feature = "python")]
+#[pyfunction]
+fn py_generate_patch_from_files(
+    path: String,
+    original_content: Option<String>,
+    new_content: Option<String>,
+) -> PyResult<String> {
+    let path = PathBuf::from(path);
+    match generate_patch_from_files(
+        &path,
+        original_content.as_deref(),
+        new_content.as_deref(),
+    ) {
+        Ok(patch) => Ok(patch),
+        Err(e) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+            e.to_string(),
+        )),
+    }
+}
+
+/// Generate a patch for multiple files
+#[cfg(feature = "python")]
+#[pyfunction]
+fn py_generate_patch_from_multiple_files(
+    file_changes: StdHashMap<String, (Option<String>, Option<String>)>,
+) -> PyResult<String> {
+    // Convert Python dict to PathBuf HashMap
+    let file_changes_map: StdHashMap<PathBuf, (Option<String>, Option<String>)> = file_changes
+        .into_iter()
+        .map(|(k, v)| (PathBuf::from(k), v))
+        .collect();
+
+    match generate_patch_from_multiple_files(&file_changes_map) {
+        Ok(patch) => Ok(patch),
+        Err(e) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+            e.to_string(),
+        )),
+    }
+}
+
 /// Python module definition
 #[cfg(feature = "python")]
 #[pymodule]
@@ -1697,6 +1937,8 @@ fn codex_apply_patch(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py_parse_patch, m)?)?;
     m.add_function(wrap_pyfunction!(py_get_tool_instructions, m)?)?;
     m.add_function(wrap_pyfunction!(py_get_api_instructions, m)?)?;
+    m.add_function(wrap_pyfunction!(py_generate_patch_from_files, m)?)?;
+    m.add_function(wrap_pyfunction!(py_generate_patch_from_multiple_files, m)?)?;
     m.add_class::<PyApplyPatchError>()?;
     m.add_class::<PyInMemoryPatchResult>()?;
     m.add("__version__", "0.1.0")?;
