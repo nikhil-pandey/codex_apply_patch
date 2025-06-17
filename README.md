@@ -80,6 +80,23 @@ patch = """*** Begin Patch
 result = cap.apply_patch_in_memory(patch, files)
 print("Modified files:", result.files)
 print("Summary:", f"Added: {len(result.added)}, Modified: {len(result.modified)}, Deleted: {len(result.deleted)}")
+
+# Generate patch from file contents (new feature)
+original = "def hello():\n    print('old version')"
+new = "def hello():\n    print('new version')\n    print('updated!')"
+patch = cap.generate_patch("main.py", original, new)
+print("Generated patch:")
+print(patch)
+
+# Generate patch for multiple files (new feature)
+file_changes = {
+    "new.py": (None, "print('new file')"),  # Add file
+    "old.py": ("old content", None),        # Delete file
+    "update.py": ("old", "new")             # Update file
+}
+multi_patch = cap.generate_patch_from_files(file_changes)
+print("Multi-file patch:")
+print(multi_patch)
 ```
 
 ### Python API Reference
@@ -87,6 +104,8 @@ print("Summary:", f"Added: {len(result.added)}, Modified: {len(result.modified)}
 - `apply_patch(patch_str)` - Apply patch to files on disk
 - `apply_patch_in_memory(patch_str, files_dict)` - Apply patch to in-memory files 
 - `parse_patch(patch_str)` - Parse patch and return structure information
+- `generate_patch(path, original_content, new_content)` - Generate patch for a single file
+- `generate_patch_from_files(files_dict)` - Generate patch for multiple files
 - `get_tool_instructions()` - Get the CLI tool instructions for AI assistants
 - `get_api_instructions()` - Get the patch format instructions (without CLI specifics)
 

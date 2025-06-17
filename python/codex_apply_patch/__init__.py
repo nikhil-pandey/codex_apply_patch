@@ -14,8 +14,8 @@ apply_patch_in_memory = _rust_module.py_apply_patch_in_memory
 parse_patch = _rust_module.py_parse_patch
 get_tool_instructions = _rust_module.py_get_tool_instructions
 get_api_instructions = _rust_module.py_get_api_instructions
+generate_patch = _rust_module.py_generate_patch
 generate_patch_from_files = _rust_module.py_generate_patch_from_files
-generate_patch_from_multiple_files = _rust_module.py_generate_patch_from_multiple_files
 
 # Expose the classes with cleaner names
 ApplyPatchError = _rust_module.PyApplyPatchError
@@ -28,8 +28,8 @@ __all__ = [
     "parse_patch",
     "get_tool_instructions",
     "get_api_instructions",
+    "generate_patch",
     "generate_patch_from_files",
-    "generate_patch_from_multiple_files",
     "ApplyPatchError",
     "InMemoryPatchResult",
 ] 
