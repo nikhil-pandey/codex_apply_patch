@@ -38,6 +38,14 @@ pip install maturin
 maturin develop --release
 ```
 
+### Rust via GitHub
+
+Add this to your `Cargo.toml`:
+
+```toml
+codex-apply-patch = { git = "https://github.com/nikhil-pandey/codex_apply_patch" }
+```
+
 ## Usage
 
 ### Command Line
@@ -99,6 +107,72 @@ print("Multi-file patch:")
 print(multi_patch)
 ```
 
+### Rust Library
+
+#### Apply patch to disk
+
+```rust
+use codex_apply_patch::apply_patch;
+
+let patch = r#"*** Begin Patch
+*** Add File: hello.txt
++Hello from Rust!
+*** End Patch"#;
+
+apply_patch(patch, &mut std::io::stdout(), &mut std::io::stderr())?;
+```
+
+#### Apply patch in memory
+
+```rust
+use std::collections::HashMap;
+use std::path::PathBuf;
+use codex_apply_patch::apply_patch_in_memory;
+
+let files = HashMap::from([(PathBuf::from("hello.txt"), "old text\n".to_string())]);
+let mut out = Vec::new();
+let mut err = Vec::new();
+let patch = r#"*** Begin Patch
+*** Update File: hello.txt
+@@
+-old text
++new text
+*** End Patch"#;
+let result = apply_patch_in_memory(patch, &files, &mut out, &mut err)?;
+```
+
+#### Generate and parse patches
+
+```rust
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use codex_apply_patch::{generate_patch, generate_patch_from_files, parse_patch};
+
+let patch = generate_patch(Path::new("hello.txt"), None, Some("Hello\n"))?;
+let hunks = parse_patch(&patch)?;
+
+let changes = HashMap::from([(PathBuf::from("hello.txt"), (None, Some("Hello\n".to_string())))]);
+let multi_patch = generate_patch_from_files(&changes)?;
+```
+
+#### Tool instructions
+
+```rust
+use codex_apply_patch::{APPLY_PATCH_TOOL_INSTRUCTIONS, APPLY_PATCH_API_INSTRUCTIONS};
+
+println!("{}", APPLY_PATCH_TOOL_INSTRUCTIONS);
+println!("{}", APPLY_PATCH_API_INSTRUCTIONS);
+```
+
+### Rust API Reference
+
+- `apply_patch(patch, stdout, stderr)` - Apply patch to files on disk
+- `apply_patch_in_memory(patch, files, stdout, stderr)` - Apply patch to in-memory files
+- `parse_patch(patch)` - Parse patch and return hunks
+- `generate_patch(path, original, new)` - Generate patch for a single file
+- `generate_patch_from_files(changes)` - Generate patch for multiple files
+- `APPLY_PATCH_TOOL_INSTRUCTIONS` - CLI tool usage text
+- `APPLY_PATCH_API_INSTRUCTIONS` - Patch format instructions
 ### Python API Reference
 
 - `apply_patch(patch_str)` - Apply patch to files on disk
